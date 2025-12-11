@@ -1,0 +1,20 @@
+{"prompt": "<image>\nUser: <image>\nUser: Open the Settings app.\nModel:\nModel:", "chosen": "CLICK: (250, 400)", "rejected": "CLICK: (243, 391)"}
+{"prompt": "<image>\nUser: <image>\nUser: Open the Settings app.\nModel:\nModel:", "chosen": "CLICK: (250, 400)", "rejected": "TYPE: \"placeholder_text\""}
+{"prompt": "<image>\nUser: <image>\nUser: Type 'hello' in the search bar.\nModel:\nModel:", "chosen": "CLICK: (500, 600)", "rejected": "CLICK: (494, 635)"}
+{"prompt": "<image>\nUser: <image>\nUser: Type 'hello' in the search bar.\nModel:\nModel:", "chosen": "CLICK: (500, 600)", "rejected": "TYPE: \"placeholder_text\""}
+{"prompt": "<image>\nUser: <image>\nUser: Tap on the home button.\nModel:\nModel:", "chosen": "TYPE: \"search query\"", "rejected": "TYPE: \"search query\""}
+{"prompt": "<image>\nUser: <image>\nUser: Tap on the home button.\nModel:\nModel:", "chosen": "TYPE: \"search query\"", "rejected": "CLICK: (500, 500)"}
+{"prompt": "<image>\nUser: <image>\nUser: Scroll down to see more options.\nModel:\nModel:", "chosen": "CLICK: (100, 200)", "rejected": "CLICK: (94, 125)"}
+{"prompt": "<image>\nUser: <image>\nUser: Scroll down to see more options.\nModel:\nModel:", "chosen": "CLICK: (100, 200)", "rejected": "TYPE: \"placeholder_text\""}
+{"prompt": "<image>\nUser: <image>\nUser: Long press to open context menu.\nModel:\nModel:", "chosen": "SCROLL: (500, 500)", "rejected": "SCROLL: (500, 500)"}
+{"prompt": "<image>\nUser: <image>\nUser: Long press to open context menu.\nModel:\nModel:", "chosen": "SCROLL: (500, 500)", "rejected": "CLICK: (0, 0)"}
+{"prompt": "<image>\nUser: <image>\nUser: Find and click the search icon.\nModel:\nModel:", "chosen": "LONG_PRESS: (300, 350)", "rejected": "LONG_PRESS: (317, 337)"}
+{"prompt": "<image>\nUser: <image>\nUser: Find and click the search icon.\nModel:\nModel:", "chosen": "LONG_PRESS: (300, 350)", "rejected": "CLICK: (0, 0)"}
+{"prompt": "<image>\nUser: <image>\nUser: Open the Settings app.\nModel:\nModel:", "chosen": "CLICK: (250, 400)", "rejected": "CLICK: (239, 406)"}
+{"prompt": "<image>\nUser: <image>\nUser: Open the Settings app.\nModel:\nModel:", "chosen": "CLICK: (250, 400)", "rejected": "TYPE: \"placeholder_text\""}
+{"prompt": "<image>\nUser: <image>\nUser: Type 'hello' in the search bar.\nModel:\nModel:", "chosen": "CLICK: (500, 600)", "rejected": "CLICK: (512, 658)"}
+{"prompt": "<image>\nUser: <image>\nUser: Type 'hello' in the search bar.\nModel:\nModel:", "chosen": "CLICK: (500, 600)", "rejected": "TYPE: \"placeholder_text\""}
+{"prompt": "<image>\nUser: <image>\nUser: Tap on the home button.\nModel:\nModel:", "chosen": "TYPE: \"search query\"", "rejected": "TYPE: \"search query\""}
+{"prompt": "<image>\nUser: <image>\nUser: Tap on the home button.\nModel:\nModel:", "chosen": "TYPE: \"search query\"", "rejected": "CLICK: (500, 500)"}
+{"prompt": "<image>\nUser: <image>\nUser: Scroll down to see more options.\nModel:\nModel:", "chosen": "CLICK: (100, 200)", "rejected": "CLICK: (133, 206)"}
+{"prompt": "<image>\nUser: <image>\nUser: Scroll down to see more options.\nModel:\nModel:", "chosen": "CLICK: (100, 200)", "rejected": "TYPE: \"placeholder_text\""}
