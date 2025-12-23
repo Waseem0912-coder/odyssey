@@ -1,212 +1,86 @@
 #!/usr/bin/env python3
 """
-Quick Start: Quantize Ministral-3-14B-Reasoning to 4-bit and run inference.
+Simple AWQ Quantization for Ministral-3-14B-Reasoning-2512
 
-This is a simplified, self-contained script for quick testing.
+Minimal script - just run it to quantize the model.
 
-Usage:
+Install first:
     uv pip install torch --index-url https://download.pytorch.org/whl/cu121
-    uv pip install vllm llmcompressor transformers accelerate datasets sentencepiece
-    python quick_start.py
+    uv pip install vllm llmcompressor "transformers>=5.0.0" accelerate datasets mistral-common
 """
 
-import os
 import torch
+from datasets import load_dataset
+from transformers import Mistral3ForConditionalGeneration, AutoProcessor
+from llmcompressor import oneshot
+from llmcompressor.modifiers.awq import AWQModifier
 
-# ============================================================
-# CONFIGURATION - Modify these as needed
-# ============================================================
+# Configuration
+MODEL_ID = "mistralai/Ministral-3-14B-Reasoning-2512"
+OUTPUT_DIR = "./ministral-3-14b-awq"
+NUM_SAMPLES = 256
+MAX_SEQ_LEN = 2048
 
-MODEL_ID = "mistralai/Ministral-3-14B-Reasoning-2512"  # Model to quantize
-OUTPUT_DIR = "./ministral-3-14b-reasoning-4bit-gptq"   # Where to save quantized model
-NUM_CALIBRATION_SAMPLES = 256                           # More = better quality, slower
-MAX_SEQ_LENGTH = 4096                                   # Max context for calibration
+print(f"Loading model: {MODEL_ID}")
+model = Mistral3ForConditionalGeneration.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+    trust_remote_code=True,
+)
+processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
 
-# Test prompts after quantization (reasoning-focused)
-TEST_PROMPTS = [
-    "Solve this step by step: If a train travels 120 km in 2 hours, then stops for 30 minutes, then travels another 90 km in 1.5 hours, what is the average speed for the entire journey including the stop?",
-    "A farmer has chickens and rabbits. He counts 50 heads and 140 legs. How many chickens and how many rabbits does he have? Show your reasoning.",
-    "Explain the logical flaw in this argument: 'All cats have four legs. My dog has four legs. Therefore, my dog is a cat.'",
-]
+print("Loading calibration data...")
+ds = load_dataset("mit-han-lab/pile-val-backup", split=f"validation[:{NUM_SAMPLES}]")
+ds = ds.shuffle(seed=42)
 
-# ============================================================
-# STEP 1: QUANTIZE THE MODEL
-# ============================================================
-
-def quantize():
-    """Quantize the model to 4-bit using GPTQ."""
-    from llmcompressor.modifiers.quantization import GPTQModifier
-    from llmcompressor.transformers import oneshot
-    from transformers import AutoTokenizer
-    from datasets import load_dataset
-    
-    print("=" * 60)
-    print(f"QUANTIZING: {MODEL_ID}")
-    print(f"OUTPUT: {OUTPUT_DIR}")
-    print("=" * 60)
-    
-    # Check if already quantized
-    if os.path.exists(os.path.join(OUTPUT_DIR, "config.json")):
-        print(f"Model already exists at {OUTPUT_DIR}, skipping quantization...")
-        return OUTPUT_DIR
-    
-    # Load tokenizer
-    print("\n[1/4] Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
-    
-    # Load calibration dataset
-    print("\n[2/4] Loading calibration dataset...")
-    dataset = load_dataset(
-        "neuralmagic/LLM_compression_calibration", 
-        split="train"
+def tokenize(sample):
+    return tokenizer(
+        sample["text"][:2000],
+        padding=False,
+        max_length=MAX_SEQ_LEN,
+        truncation=True,
+        add_special_tokens=False,
     )
-    dataset = dataset.shuffle(seed=42).select(range(NUM_CALIBRATION_SAMPLES))
-    
-    # Define GPTQ recipe for 4-bit quantization
-    print("\n[3/4] Setting up GPTQ quantization recipe...")
-    recipe = GPTQModifier(
-        targets="Linear",           # Quantize all linear layers
-        scheme="W4A16",             # 4-bit weights, 16-bit activations
-        ignore=["lm_head"],         # Don't quantize output layer
-        dampening_frac=0.1,         # Regularization
-        block_size=128,             # Group size
-    )
-    
-    # Run quantization
-    print("\n[4/4] Running quantization (this will take a while)...")
-    print(f"      Using {NUM_CALIBRATION_SAMPLES} calibration samples")
-    
-    oneshot(
-        model=MODEL_ID,
-        dataset=dataset,
-        recipe=recipe,
-        output_dir=OUTPUT_DIR,
-        max_seq_length=MAX_SEQ_LENGTH,
-        num_calibration_samples=NUM_CALIBRATION_SAMPLES,
-        trust_remote_code=True,
-    )
-    
-    # Save tokenizer
-    tokenizer.save_pretrained(OUTPUT_DIR)
-    
-    print(f"\n✓ Quantized model saved to: {OUTPUT_DIR}")
-    return OUTPUT_DIR
 
+ds = ds.map(tokenize, remove_columns=ds.column_names)
 
-# ============================================================
-# STEP 2: RUN INFERENCE WITH VLLM
-# ============================================================
+print("Applying AWQ quantization...")
+# AWQ recipe - ignore vision encoder and lm_head
+recipe = AWQModifier(
+    targets=["Linear"],
+    scheme="W4A16",
+    ignore=[
+        "lm_head",
+        "re:.*vision.*",
+        "re:.*visual.*",
+        "re:.*image.*",
+        "re:.*multi_modal_projector.*",
+    ],
+)
 
-def run_inference(model_path: str):
-    """Run inference on the quantized model using vLLM."""
-    from vllm import LLM, SamplingParams
-    
-    print("\n" + "=" * 60)
-    print("RUNNING INFERENCE WITH VLLM")
-    print("=" * 60)
-    
-    # Initialize vLLM
-    print("\nLoading quantized model...")
-    llm = LLM(
-        model=model_path,
-        quantization="gptq",
-        dtype="float16",
-        trust_remote_code=True,
-        max_model_len=4096,
-        gpu_memory_utilization=0.85,
-    )
-    
-    # Sampling parameters (reasoning models need more tokens)
-    sampling_params = SamplingParams(
-        temperature=0.7,
-        top_p=0.95,
-        max_tokens=1024,
-    )
-    
-    # Generate
-    print("\nGenerating responses...\n")
-    outputs = llm.generate(TEST_PROMPTS, sampling_params)
-    
-    # Display results
-    for i, output in enumerate(outputs):
-        print(f"{'─' * 60}")
-        print(f"PROMPT {i+1}: {output.prompt}")
-        print(f"{'─' * 60}")
-        print(f"RESPONSE: {output.outputs[0].text.strip()}")
-        print()
-    
-    return outputs
+oneshot(
+    model=model,
+    dataset=ds,
+    recipe=recipe,
+    max_seq_length=MAX_SEQ_LEN,
+    num_calibration_samples=NUM_SAMPLES,
+)
 
+print(f"Saving to {OUTPUT_DIR}...")
+model.save_pretrained(OUTPUT_DIR, save_compressed=True)
+processor.save_pretrained(OUTPUT_DIR)
 
-# ============================================================
-# STEP 3: OPTIONAL - START API SERVER
-# ============================================================
+print("\n" + "="*50)
+print("DONE! Testing generation...")
+print("="*50)
 
-def start_server(model_path: str, port: int = 8000):
-    """Start an OpenAI-compatible API server."""
-    import subprocess
-    import sys
-    
-    print("\n" + "=" * 60)
-    print(f"STARTING VLLM SERVER ON PORT {port}")
-    print("=" * 60)
-    
-    cmd = [
-        sys.executable, "-m", "vllm.entrypoints.openai.api_server",
-        "--model", model_path,
-        "--host", "0.0.0.0",
-        "--port", str(port),
-        "--quantization", "gptq",
-        "--trust-remote-code",
-    ]
-    
-    print(f"\nServer URL: http://localhost:{port}")
-    print("\nExample curl command:")
-    print(f'''curl http://localhost:{port}/v1/chat/completions \\
-    -H "Content-Type: application/json" \\
-    -d '{{"model": "{model_path}", "messages": [{{"role": "user", "content": "Hello!"}}]}}'
-''')
-    print("Press Ctrl+C to stop the server\n")
-    
-    subprocess.run(cmd)
+inputs = tokenizer("Hello, what is 2+2?", return_tensors="pt").to(model.device)
+with torch.no_grad():
+    out = model.generate(**inputs, max_new_tokens=50)
+print(tokenizer.decode(out[0], skip_special_tokens=True))
 
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Quantize and run Ministral-3-14B-Reasoning model")
-    parser.add_argument("--skip-quantize", action="store_true", help="Skip quantization step")
-    parser.add_argument("--serve", action="store_true", help="Start API server instead of running inference")
-    parser.add_argument("--port", type=int, default=8000, help="Server port")
-    parser.add_argument("--model-path", type=str, default=OUTPUT_DIR, help="Path to quantized model")
-    
-    args = parser.parse_args()
-    
-    # Print GPU info
-    if torch.cuda.is_available():
-        gpu_name = torch.cuda.get_device_name(0)
-        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-        print(f"GPU: {gpu_name} ({gpu_memory:.1f} GB)")
-    else:
-        print("WARNING: No GPU detected! This will be very slow.")
-    
-    # Quantize (unless skipped)
-    if not args.skip_quantize:
-        model_path = quantize()
-    else:
-        model_path = args.model_path
-        print(f"Using existing model at: {model_path}")
-    
-    # Run inference or start server
-    if args.serve:
-        start_server(model_path, args.port)
-    else:
-        run_inference(model_path)
-
-
-if __name__ == "__main__":
-    main()
+print(f"\nModel saved to: {OUTPUT_DIR}")
+print(f"\nRun with vLLM:")
+print(f"  vllm serve {OUTPUT_DIR} --tokenizer_mode mistral --config_format mistral --load_format mistral")
