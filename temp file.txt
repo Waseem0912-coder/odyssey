@@ -1,86 +1,80 @@
-#!/usr/bin/env python3
-"""
-Simple AWQ Quantization for Ministral-3-14B-Reasoning-2512
-
-Minimal script - just run it to quantize the model.
-
-Install first:
-    uv pip install torch --index-url https://download.pytorch.org/whl/cu121
-    uv pip install vllm llmcompressor "transformers>=5.0.0" accelerate datasets mistral-common
-"""
-
+import os
+import shutil
 import torch
-from datasets import load_dataset
-from transformers import Mistral3ForConditionalGeneration, AutoProcessor
-from llmcompressor import oneshot
-from llmcompressor.modifiers.awq import AWQModifier
 
-# Configuration
-MODEL_ID = "mistralai/Ministral-3-14B-Reasoning-2512"
-OUTPUT_DIR = "./ministral-3-14b-awq"
-NUM_SAMPLES = 256
-MAX_SEQ_LEN = 2048
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from llmcompressor.modifiers.quantization import GPTQModifier
+from llmcompressor.transformers import oneshot
 
-print(f"Loading model: {MODEL_ID}")
-model = Mistral3ForConditionalGeneration.from_pretrained(
+# ------------------------------------------------------------
+# 1. Configuration
+# ------------------------------------------------------------
+MODEL_ID = "mistralai/Ministral-3-14B-Instruct-2512"
+OUTPUT_DIR = "./Ministral-3-14B-Instruct-AWQ"
+
+# Clean output directory manually (oneshot does NOT overwrite)
+if os.path.exists(OUTPUT_DIR):
+    print(f"Removing existing output dir: {OUTPUT_DIR}")
+    shutil.rmtree(OUTPUT_DIR)
+
+# ------------------------------------------------------------
+# 2. Safety Check: Load Model (Text Path Only)
+# ------------------------------------------------------------
+print("Loading model for sanity check...")
+
+tokenizer = AutoTokenizer.from_pretrained(
     MODEL_ID,
-    torch_dtype=torch.bfloat16,
+    trust_remote_code=True,
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.float16,
     device_map="auto",
     trust_remote_code=True,
 )
-processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-tokenizer = processor.tokenizer if hasattr(processor, 'tokenizer') else processor
 
-print("Loading calibration data...")
-ds = load_dataset("mit-han-lab/pile-val-backup", split=f"validation[:{NUM_SAMPLES}]")
-ds = ds.shuffle(seed=42)
+# Simple forward pass to ensure vision modules don't break tracing
+with torch.no_grad():
+    inputs = tokenizer("Hello world", return_tensors="pt").to(model.device)
+    _ = model(**inputs)
 
-def tokenize(sample):
-    return tokenizer(
-        sample["text"][:2000],
-        padding=False,
-        max_length=MAX_SEQ_LEN,
-        truncation=True,
-        add_special_tokens=False,
+print("Model forward pass OK.")
+
+# ------------------------------------------------------------
+# 3. Define Quantization Recipe
+# ------------------------------------------------------------
+recipe = [
+    GPTQModifier(
+        scheme="W4A16",
+        targets="Linear",
+        # Ignore heads + all known vision components
+        ignore=[
+            "lm_head",
+            "vision_encoder",
+            "vision_tower",
+            "vision_model",
+            "multi_modal_projector",
+            "modality_preprocessors",
+        ],
+        dampening_frac=0.01,
+        observer="mse",
     )
+]
 
-ds = ds.map(tokenize, remove_columns=ds.column_names)
-
-print("Applying AWQ quantization...")
-# AWQ recipe - ignore vision encoder and lm_head
-recipe = AWQModifier(
-    targets=["Linear"],
-    scheme="W4A16",
-    ignore=[
-        "lm_head",
-        "re:.*vision.*",
-        "re:.*visual.*",
-        "re:.*image.*",
-        "re:.*multi_modal_projector.*",
-    ],
-)
+# ------------------------------------------------------------
+# 4. Run One-Shot Quantization
+# ------------------------------------------------------------
+print(f"Starting GPTQ quantization for {MODEL_ID}...")
 
 oneshot(
-    model=model,
-    dataset=ds,
+    model=MODEL_ID,
+    dataset="open_platypus",
     recipe=recipe,
-    max_seq_length=MAX_SEQ_LEN,
-    num_calibration_samples=NUM_SAMPLES,
+    output_dir=OUTPUT_DIR,
+    num_calibration_samples=512,
+    max_seq_length=2048,
+    trust_remote_code_model=True,  # CORRECT flag name
 )
 
-print(f"Saving to {OUTPUT_DIR}...")
-model.save_pretrained(OUTPUT_DIR, save_compressed=True)
-processor.save_pretrained(OUTPUT_DIR)
-
-print("\n" + "="*50)
-print("DONE! Testing generation...")
-print("="*50)
-
-inputs = tokenizer("Hello, what is 2+2?", return_tensors="pt").to(model.device)
-with torch.no_grad():
-    out = model.generate(**inputs, max_new_tokens=50)
-print(tokenizer.decode(out[0], skip_special_tokens=True))
-
-print(f"\nModel saved to: {OUTPUT_DIR}")
-print(f"\nRun with vLLM:")
-print(f"  vllm serve {OUTPUT_DIR} --tokenizer_mode mistral --config_format mistral --load_format mistral")
+print(f"Quantization complete. Model saved to: {OUTPUT_DIR}")
